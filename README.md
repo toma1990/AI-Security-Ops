@@ -1,68 +1,97 @@
 # AI Security Operations Dashboard
 
-A Python-based security operations tool that aggregates findings 
-from multiple AWS security services, correlates them using AI, 
-and generates a unified dashboard with prioritised remediation guidance.
+A Python tool that aggregates findings from multiple AWS security 
+services, uses AI to correlate and prioritise them, and generates 
+a unified dashboard for security triage.
 
-## What it does
+## What I set out to solve
 
-Pulls security findings from multiple sources in parallel:
+Security teams often work across multiple tools simultaneously - 
+GuardDuty for threat detection, IAM audits for identity issues, 
+compliance scanners for configuration drift. Switching between 
+dashboards makes it easy to miss patterns that only become visible 
+when findings from different sources are viewed together.
 
-- AWS GuardDuty - threat detection findings from the last 24 hours
-- IAM security checks - missing MFA, overprivileged users, stale access keys
+This project combines findings from multiple sources into one place 
+and uses AI to provide a correlation layer - identifying whether 
+separate findings might represent a connected threat rather than 
+unrelated issues.
 
-Feeds all findings into AWS Bedrock (Claude Haiku) which:
+## What I implemented
 
-- Assesses overall risk level across the environment
-- Identifies patterns and correlations across findings from different sources
-- Prioritises the top 3 actions by urgency
-- Flags quick wins that can be resolved in under 10 minutes
+- Collects GuardDuty findings from the last 24 hours
+- Runs IAM checks for missing MFA, admin access, and stale keys
+- Combines all findings into a single list sorted by severity
+- Sends findings to AWS Bedrock for AI-assisted triage and correlation
+- Generates a dark-themed HTML dashboard with severity metrics and 
+  AI analysis at the top
 
-Generates a dark-themed HTML dashboard showing all findings by 
-severity with the AI analysis at the top.
+Note: collection runs sequentially, not in parallel. GuardDuty 
+findings are retrieved first, then IAM checks run separately.
 
-## Why I built this
+## What was actually tested
 
-Alert fatigue is one of the biggest problems in security operations. 
-A GuardDuty finding and an IAM misconfiguration might look unrelated 
-in isolation but could represent a coordinated attack pattern when 
-viewed together.
+The tool was run against a live AWS account and processed four findings:
 
-This tool is an attempt to solve that - instead of checking multiple 
-dashboards separately, everything feeds into one place and AI provides 
-the correlation layer that a tier 1 analyst would otherwise do manually.
+- Two GuardDuty findings - root credential usage from an external IP
+- Two IAM findings - admin user without MFA
 
-## Tech used
+The AI analysis identified that root credential usage from an external 
+IP combined with an unprotected admin account could represent a 
+connected threat pattern. This was a test observation based on 
+sample GuardDuty findings and a deliberately misconfigured test user - 
+it is not a confirmed attack. The AI generated this correlation from 
+the findings it received and it should be treated as a hypothesis 
+to investigate, not a verified conclusion.
 
-- Python 3
-- boto3 (AWS SDK)
-- AWS GuardDuty
-- AWS IAM
-- AWS Bedrock (Claude Haiku) for AI correlation and triage
+## How AI is used and its limitations
 
-## How to run it
+The AI component receives a structured list of findings and returns:
+- An overall risk assessment
+- Prioritised remediation actions
+- Possible correlations between findings
+- Quick wins
 
-Configure AWS CLI with appropriate permissions, then:
+The AI does not have access to raw logs, network traffic, or any 
+data beyond what the collection functions retrieve. Its analysis 
+is based entirely on the structured finding summaries passed to it.
 
-pip install boto3 markdown
-python3 security_ops.py
+Important limitations:
+- The model can produce incorrect correlations or miss relevant context
+- Remediation suggestions should be verified against the original 
+  finding before being acted on
+- A high risk assessment from the AI does not confirm an attack 
+  has occurred - it indicates findings that warrant investigation
+- The current prototype does not automatically execute any AI recommendations
+- Deterministic checks identify the findings - the AI summarises 
+  and prioritises them, it does not decide whether a finding is valid
 
-The dashboard HTML file is saved to the reports/ folder.
-Open it in any browser to view.
+## Why I chose this approach
 
-## Example output
+Combining multiple finding sources addresses a real alert fatigue 
+problem. A GuardDuty finding and an IAM misconfiguration might look 
+unrelated when viewed separately but could be connected. Having a 
+human-readable correlation summary at the top of a combined dashboard 
+is more useful than separate tools with separate outputs.
 
-The tool correlates findings across sources. In testing it identified 
-that root credential usage from an external IP combined with an 
-unprotected admin account represented a coordinated attack pattern 
-rather than two separate issues - generating a single prioritised 
-incident response plan rather than two unrelated alerts.
+Bedrock was chosen over an external API because it keeps all data 
+within the AWS environment and uses the same IAM credentials already 
+configured for the other tools.
 
-## What's next
+## Collection limitations
 
-Planning to add:
-- CloudTrail log analysis as a third finding source
-- SNS alerting when critical findings are detected
-- Scheduled Lambda execution so the dashboard updates automatically
-- Integration with the automated IR system to trigger response 
-  workflows directly from dashboard findings
+- GuardDuty retrieval is capped at 50 findings to control Bedrock costs
+- IAM checks cover a limited subset of user risks, not effective 
+  permissions across the full account
+- Collection errors result in partial results being passed to the AI 
+  without a clear indication that the scan was incomplete
+- The dashboard does not show the status of each collection source
+
+## What I would change before production
+
+- Show collection status per source so incomplete scans are visible
+- Add CloudTrail log analysis as a third finding source
+- Paginate GuardDuty results fully rather than capping at 50
+- Add a verification step between AI recommendations and any automated action
+- Sanitise HTML output before inserting into the dashboard
+- Schedule via Lambda so the dashboard updates automatically
